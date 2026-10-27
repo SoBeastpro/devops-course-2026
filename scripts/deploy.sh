@@ -9,8 +9,9 @@ REMOTE_DIR="/var/www/devops-site"
 SITE_URL="https://devops.local"
 CA_CERT="${HOME}/devops.crt"
 
-# Определяем корень репозитория независимо от текущей директории
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+# Определяем корень репозитория по расположению скрипта, а не по текущей директории
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || {
     echo "Ошибка: скрипт должен запускаться внутри Git-репозитория." >&2
     exit 1
 }

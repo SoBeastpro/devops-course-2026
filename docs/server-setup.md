@@ -63,5 +63,96 @@
 - `01-clean-install` — исходное состояние после установки ОС.
 - `02-keys-configured` — состояние после настройки доступа по SSH-ключу.
 - `03-ssh-hardened` — состояние после настройки SSH и межсетевого экрана.
+- `04-nginx-https` — состояние после установки Nginx и перевода ресурса на HTTPS.
 
-Названия и назначение снимков необходимо сверить с фактическими снимками в VirtualBox.
+## 8. Веб-сервер
+
+### 8.1. Пакет и служба
+
+- Пакет: `nginx` из репозитория Ubuntu (`sudo apt install -y nginx`), версия `nginx/1.28.3 (Ubuntu)`.
+- Служба `nginx` включена в автозапуск (`enabled`) и активна.
+- Главный процесс работает от `root`, рабочие процессы — от `www-data`.
+- Правила UFW для портов `80/tcp` и `443/tcp` уже есть (раздел 6); профиль `Nginx Full` не добавляется.
+- Изменения конфигурации применяются только командой `sudo nginx -t && sudo systemctl reload nginx`.
+
+### 8.2. Конфигурация ресурса
+
+- Файл конфигурации: `/etc/nginx/sites-available/devops-site`, владелец `root:root`, права `644`.
+- Активация: символическая ссылка `/etc/nginx/sites-enabled/devops-site -> /etc/nginx/sites-available/devops-site`.
+- Стандартный ресурс отключён: ссылка `/etc/nginx/sites-enabled/default` удалена, файл `/etc/nginx/sites-available/default` сохранён.
+- Журналы: `/var/log/nginx/devops-site.access.log`, `/var/log/nginx/devops-site.error.log`.
+- HSTS не используется (сертификат самоподписанный).
+
+Полный текст конфигурации:
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name devops.local;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name devops.local;
+
+    root /var/www/devops-site;
+    index index.html;
+
+    ssl_certificate /etc/ssl/certs/devops.crt;
+    ssl_certificate_key /etc/ssl/private/devops.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    error_page 404 /404.html;
+
+    access_log /var/log/nginx/devops-site.access.log;
+    error_log /var/log/nginx/devops-site.error.log;
+}
+```
+
+### 8.3. Каталог ресурса
+
+- Каталог: `/var/www/devops-site`, владелец `devops:devops`.
+- Права: каталоги `755` (`drwxr-xr-x`), файлы `644` (`-rw-r--r--`). Модель «владелец пишет, веб-сервер читает»: `www-data` читает файлы как «остальные», но не может их изменять.
+- Файлов с правом записи для всех быть не должно: `find /var/www/devops-site -perm -o+w` — пустой вывод.
+- Содержимое доставляется только сценарием `scripts/deploy.sh` (rsync с `--delete --chmod=D755,F644`), ручные изменения на сервере не допускаются.
+
+Создание каталога:
+
+```bash
+sudo mkdir -p /var/www/devops-site
+sudo chown -R devops:devops /var/www/devops-site
+```
+
+### 8.4. Сертификат TLS
+
+- Сертификат: `/etc/ssl/certs/devops.crt`, владелец `root:root`, права `644`.
+- Закрытый ключ: `/etc/ssl/private/devops.key`, владелец `root:root`, права `600`. Ключ за пределы `/etc/ssl/private` не копируется и в репозиторий не добавляется.
+- Тип: самоподписанный (`subject` = `issuer` = `CN=devops.local`), RSA 2048, SAN `DNS:devops.local`.
+- Срок действия: 365 дней, с 27.10.2026 по 27.10.2027.
+- На хостовой системе копия сертификата лежит в `~/devops.crt` (получена через `scp devops:/etc/ssl/certs/devops.crt ~/devops.crt`) и используется как доверенная: `curl --cacert ~/devops.crt`.
+
+Команда формирования:
+
+```bash
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/private/devops.key \
+  -out /etc/ssl/certs/devops.crt \
+  -subj "/CN=devops.local" \
+  -addext "subjectAltName=DNS:devops.local"
+sudo chmod 600 /etc/ssl/private/devops.key
+```
+
+### 8.5. Проверка
+
+- `sudo nginx -t` — синтаксис корректен.
+- `curl -I http://devops.local` — `301`, `Location: https://devops.local/`.
+- `curl --cacert ~/devops.crt -I https://devops.local` — `200 OK`.
+- `scripts/audit.sh`, раздел `[4] Веб-сервер` — все проверки `[OK]`, код возврата `0`.

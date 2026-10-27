@@ -15,6 +15,8 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || {
     echo "Ошибка: скрипт должен запускаться внутри Git-репозитория." >&2
     exit 1
 }
+# В Git Bash путь имеет вид C:/..., и rsync принял бы "C:" за имя удалённого узла
+REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 
 LOCAL_DIR="${REPO_ROOT}/site/"
 

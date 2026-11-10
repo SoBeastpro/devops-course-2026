@@ -64,4 +64,38 @@
 - `02-keys-configured` — состояние после настройки доступа по SSH-ключу.
 - `03-ssh-hardened` — состояние после настройки SSH и межсетевого экрана.
 
-Названия и назначение снимков необходимо сверить с фактическими снимками в VirtualBox.
+## 8. Веб-сервер
+*   **Пакет:** `nginx` (установлен из репозитория Ubuntu).
+*   **Конфигурация ресурса:** `/etc/nginx/sites-available/devops-site` (симлинк в `/etc/nginx/sites-enabled/`).
+*   **Каталог ресурса:** `/var/www/devops-site`, владелец `devops:devops`, права на каталоги `755`, на файлы `644`.
+*   **Сертификат:** `/etc/ssl/certs/devops.crt` (права `644`, владелец `root`).
+*   **Закрытый ключ:** `/etc/ssl/private/devops.key` (права `600`, владелец `root`).
+*   **Команда формирования сертификата:**
+    ```bash
+    sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+      -keyout /etc/ssl/private/devops.key \
+      -out /etc/ssl/certs/devops.crt \
+      -subj "/CN=devops.local" \
+      -addext "subjectAltName=DNS:devops.local"
+    ```
+*   **Срок действия:** 365 дней.
+
+## 9. Контейнеризация
+*   **Установка Docker:** Из официального репозитория Docker по инструкции [ссылка], версия `27.x.x` (укажите вашу из `docker version`). Пакет `docker.io` не использовался.
+*   **Группа docker:** Учётная запись `devops` добавлена в группу `docker` командой `sudo usermod -aG docker devops`.
+*   **Расположение проекта:** `~/app` (доставляется через `rsync` из репозитория).
+*   **Файл .env:** Расположен в `~/app/.env`, права `600`, владелец `devops`. Создаётся только на сервере, в репозиторий не добавлен (в `.gitignore` и `.dockerignore`).
+*   **Публикуемые порты:**
+    *   Приложение: `127.0.0.1:5000` (доступно только локально для Nginx).
+    *   СУБД (PostgreSQL): порт не опубликован, доступен только внутри сети `app_backend` по имени `db`.
+*   **Именованные тома:** `app_db_data` (хранит данные PostgreSQL в `/var/lib/postgresql/data`).
+*   **Обратный прокси-сервер:** В конфигурации Nginx (`/etc/nginx/sites-available/devops-site`) в блоке HTTPS добавлен location:
+    ```nginx
+    location /app/ {
+        proxy_pass http://127.0.0.1:5000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    ```
